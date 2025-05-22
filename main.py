@@ -38,35 +38,59 @@ async def disconnect_user(member, channel, disconnect_time):
 async def on_ready():
     print(f'{bot.user.name} is online.')
 
-    if os.path.exists(PENDING_COMMANDS_FILE):
-        with open(PENDING_COMMANDS_FILE, 'r') as f:
-            lines = f.readlines()
-        for line in lines:
-            user_id, channel_id, disconnect_time_str = line.strip().split()
-            user_id = int(user_id)
-            channel_id = int(channel_id)
+    if not os.path.exists(PENDING_COMMANDS_FILE):
+        return
+
+    with open(PENDING_COMMANDS_FILE, 'r') as f:
+        lines = f.readlines()
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue  # überspringe Leerzeilen
+
+        # Nur maximal 2 Splits, damit Datum+Uhrzeit zusammenbleiben
+        parts = line.split(maxsplit=2)
+        if len(parts) != 3:
+            print(f"Ignoriere unvollständige Zeile: {line!r}")
+            continue
+
+        user_id_str, channel_id_str, disconnect_time_str = parts
+        try:
+            user_id = int(user_id_str)
+            channel_id = int(channel_id_str)
             disconnect_time = datetime.fromisoformat(disconnect_time_str)
-            guild = bot.guilds[0]  # Assumes the bot is only in one guild
-            member = guild.get_member(user_id)
-            channel = bot.get_channel(channel_id)
-            if datetime.now() >= disconnect_time:
-                await member.move_to(None)
-                await channel.send(f'{member.mention} has been disconnected from the voice channel')
-                
-                with open(PENDING_COMMANDS_FILE, 'r+') as f:
-                    file_lines = f.readlines()
-                    f.seek(0)
-                    f.truncate()
-                    for file_line in file_lines:
-                        if not file_line.startswith(f'{user_id} {channel_id} {disconnect_time.isoformat()}'):
-                            f.write(file_line)
-            else:
-                asyncio.create_task(disconnect_user(member, channel, disconnect_time))
+        except (ValueError, TypeError) as e:
+            print(f"Fehler beim Parsen der Zeile {line!r}: {e}")
+            continue
 
-import asyncio
-from datetime import datetime, timedelta
+        guild = bot.guilds[0]  # Setze hier ggf. deine Logik, falls du in mehreren Guilds bist
+        member = guild.get_member(user_id)
+        channel = bot.get_channel(channel_id)
 
-PENDING_COMMANDS_FILE = 'pending_commands.txt'
+        if member is None or channel is None:
+            print(f"Member oder Channel nicht gefunden für Zeile: {line!r}")
+            continue
+
+        # Prüfen, ob der Disconnect schon fällig ist
+        if datetime.now() >= disconnect_time:
+            # sofort ausführen
+            await member.move_to(None)
+            await channel.send(f'{member.mention} has been disconnected from the voice channel')
+
+            # und aus der Datei löschen
+            with open(PENDING_COMMANDS_FILE, 'r+') as f:
+                file_lines = f.readlines()
+                f.seek(0)
+                f.truncate()
+                for file_line in file_lines:
+                    if not file_line.startswith(f'{user_id} {channel_id} {disconnect_time.isoformat()}'):
+                        f.write(file_line)
+        else:
+            # Aufgabe anlegen für später
+            asyncio.create_task(disconnect_user(member, channel, disconnect_time))
+
+
 
 @bot.event
 async def on_message(message):
@@ -94,39 +118,108 @@ async def on_message(message):
 
     if message.content.startswith('!cancel') or message.content.startswith('!c'):
         try:
+            # 1) Stelle sicher, dass ein Mitglied erwähnt wurde
             member = message.mentions[0]
+
+            # 2) Datei öffnen und Zeilen einlesen
             with open(PENDING_COMMANDS_FILE, 'r+') as f:
-                lines = f.readlines()
+                raw_lines = f.readlines()
                 f.seek(0)
                 f.truncate()
+
                 removed = False
-                for line in lines:
-                    user_id, channel_id, disconnect_time_str = line.strip().split()
-                    if int(user_id) == member.id and int(channel_id) == message.channel.id:
+
+                for line in raw_lines:
+                    line = line.strip()
+                    if not line:
+                        # Leerzeilen überspringen
+                        continue
+
+                    # 3) maxsplit=2, damit wir Datum+Uhrzeit als einen String behalten
+                    parts = line.split(maxsplit=2)
+                    if len(parts) != 3:
+                        # Zeile nicht im erwarteten Format -> überspringen
+                        continue
+
+                    user_id_str, channel_id_str, disconnect_time_str = parts
+
+                    # 4) Jetzt sauber vergleichen
+                    try:
+                        user_id = int(user_id_str)
+                        channel_id = int(channel_id_str)
+                    except ValueError:
+                        # ungültige IDs überspringen
+                        continue
+
+                    if user_id == member.id and channel_id == message.channel.id:
                         removed = True
+                        # nicht zurückschreiben -> wird dadurch gelöscht
                     else:
-                        f.write(line)
-                if removed:
-                    await message.channel.send(f'Disconnect command for {member.mention} has been removed.')
-                else:
-                    await message.channel.send(f'There is no disconnect command for {member.mention}.')
+                        # alle anderen Befehle bleiben bestehen
+                        f.write(f'{user_id} {channel_id} {disconnect_time_str}\n')
+
+            # 5) Feedback geben
+            if removed:
+                await message.channel.send(f'Disconnect command for {member.mention} has been removed.')
+            else:
+                await message.channel.send(f'There is no disconnect command for {member.mention} in this channel.')
+
         except IndexError:
             await message.channel.send('Please mention a user to cancel the disconnect command.')
+        except FileNotFoundError:
+            await message.channel.send('There are no pending disconnect commands.')
+        except Exception as e:
+            # Nur für Debugging in Konsole, nicht in den Channel
+            print(f'Error in !cancel-Handler: {e}')
 
     if message.content.startswith('!queue') or message.content.startswith('!q'):
         try:
             with open(PENDING_COMMANDS_FILE, 'r') as f:
-                lines = f.readlines()
-            if len(lines) == 0:
-                await message.channel.send('The queue is empty.')
+                raw_lines = f.readlines()
+
+            # 1) Leerzeilen entfernen, trimmen
+            cleaned = [line.strip() for line in raw_lines if line.strip()]
+            queue_list = []
+
+            for line in cleaned:
+                # 2) maxsplit=2, damit Datum+Uhrzeit in einem String bleiben
+                parts = line.split(maxsplit=2)
+                if len(parts) != 3:
+                    # überspringe Zeilen, die nicht genau 3 Teile haben
+                    continue
+
+                user_id_str, channel_id_str, disconnect_time_str = parts
+                # 3) optional: if you want, check here whether datetime.fromisoformat works
+                try:
+                    # Nur um sicherzugehen, dass der Zeit-String valid ist
+                    datetime.fromisoformat(disconnect_time_str)
+                except Exception:
+                    continue
+
+                # Jetzt kannst du deine Hilfsfunktionen sicher aufrufen:
+                member_name = get_member_name(line)
+                disconnect_at = get_disconnect_time(line)
+                remaining = get_time_remaining(line)
+
+                queue_list.append(
+                    f'{member_name} will be disconnected at {disconnect_at} '
+                    f'(in {remaining})'
+                )
+
+            if not queue_list:
+                await message.channel.send('The queue is empty or contains only invalid entries.')
             else:
-                queue_list = [f'{get_member_name(line)} will be disconnected at \n{get_disconnect_time(line)} or after {get_time_remaining(line)}' for line in lines]
-                embed = Embed(title='Total', description='\n'.join([f'{i+1}. {item}' for i, item in enumerate(queue_list)]))
+                embed = Embed(
+                    title='Disconnect-Queue',
+                    description='\n'.join(f'{i + 1}. {item}' for i, item in enumerate(queue_list))
+                )
                 await message.channel.send(embed=embed)
+
         except FileNotFoundError:
             await message.channel.send('The queue is empty.')
         except Exception as e:
-            print(e)
+            # Nur in der Konsole loggen, nicht an den Channel
+            print(f'Error in !queue-Handler: {e}')
 
 
 def get_member_name(line):
