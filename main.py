@@ -1,10 +1,11 @@
 import discord
 from discord.ext import commands
+from discord import Embed
 import asyncio
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
-from discord import Embed
+import logging
 
 load_dotenv()
 
@@ -20,13 +21,22 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 TOKEN = os.getenv("DISCORD_TOKEN")
 PENDING_COMMANDS_FILE = 'pending_commands.txt'
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+
+
 async def disconnect_user(member, channel, disconnect_time):
     delay = (disconnect_time - datetime.now()).total_seconds()
     if delay > 0:
+        logging.info(f"Waiting {delay:.2f} seconds before disconnecting {member}.")
         await asyncio.sleep(delay)
     await member.move_to(None)
     await channel.send(f'{member.mention} has been disconnected from the voice channel')
-    
+    logging.info(f"{member} was disconnected from voice channel {channel.name}.")
+
     with open(PENDING_COMMANDS_FILE, 'r+') as f:
         lines = f.readlines()
         f.seek(0)
@@ -34,16 +44,21 @@ async def disconnect_user(member, channel, disconnect_time):
         for line in lines:
             if not line.startswith(f'{member.id} {channel.id} {disconnect_time.isoformat()}'):
                 f.write(line)
+            else:
+                logging.debug(f"Cleaning up disconnect entry for {member.id} in {PENDING_COMMANDS_FILE}.")
+
 
 @bot.event
 async def on_ready():
-    print(f'{bot.user.name} is online.')
+    logging.info(f'{bot.user.name} is online.')
 
     if not os.path.exists(PENDING_COMMANDS_FILE):
+        logging.info('No pending_commands.txt file found.')
         return
 
     with open(PENDING_COMMANDS_FILE, 'r') as f:
         lines = f.readlines()
+    logging.info(f"Loaded {len(lines)} scheduled disconnect(s) from file.")
 
     for line in lines:
         line = line.strip()
@@ -52,7 +67,7 @@ async def on_ready():
 
         parts = line.split(maxsplit=2)
         if len(parts) != 3:
-            print(f"Ignoriere unvollständige Zeile: {line!r}")
+            logging.warning(f"Ignoring malformed line: {line!r}")
             continue
 
         user_id_str, channel_id_str, disconnect_time_str = parts
@@ -61,15 +76,15 @@ async def on_ready():
             channel_id = int(channel_id_str)
             disconnect_time = datetime.fromisoformat(disconnect_time_str)
         except (ValueError, TypeError) as e:
-            print(f"Fehler beim Parsen der Zeile {line!r}: {e}")
+            logging.error(f"Error parsing line {line!r}: {e}")
             continue
 
-        guild = bot.guilds[0] 
+        guild = bot.guilds[0]
         member = guild.get_member(user_id)
         channel = bot.get_channel(channel_id)
 
         if member is None or channel is None:
-            print(f"Member oder Channel nicht gefunden für Zeile: {line!r}")
+            logging.warning(f"Member or Channel not found for line: {line!r}")
             continue
 
         if datetime.now() >= disconnect_time:
@@ -83,9 +98,10 @@ async def on_ready():
                 for file_line in file_lines:
                     if not file_line.startswith(f'{user_id} {channel_id} {disconnect_time.isoformat()}'):
                         f.write(file_line)
+            logging.info(f"Disconnect time has passed, immediately disconnecting {member}.")
         else:
             asyncio.create_task(disconnect_user(member, channel, disconnect_time))
-
+            logging.info(f"Scheduling delayed disconnect for {member} at {disconnect_time}.")
 
 
 @bot.event
@@ -109,8 +125,11 @@ async def on_message(message):
                 f.write(f'{member.id} {message.channel.id} {disconnect_time.isoformat()}\n')
             await message.channel.send(f'{member.mention} will be disconnected from the voice channel in {time_str}')
             asyncio.create_task(disconnect_user(member, message.channel, disconnect_time))
+            logging.info(f'Scheduled disconnect for {member} at {disconnect_time}')
         except (IndexError, ValueError):
-            await message.channel.send('Invalid command format. Please mention a user to disconnect and specify the delay time using a number followed by "s" for seconds, "m" for minutes, or "h" for hours.')
+            logging.warning('Invalid format in !disconnect command.')
+            await message.channel.send(
+                'Invalid command format. Please mention a user to disconnect and specify the delay time using a number followed by "s" for seconds, "m" for minutes, or "h" for hours.')
 
     if message.content.startswith('!cancel') or message.content.startswith('!c'):
         try:
@@ -147,15 +166,17 @@ async def on_message(message):
 
             if removed:
                 await message.channel.send(f'Disconnect command for {member.mention} has been removed.')
+                logging.info(f"Removed scheduled disconnect for {member}.")
             else:
                 await message.channel.send(f'There is no disconnect command for {member.mention} in this channel.')
+                logging.warning(f"No scheduled disconnect found for {member}.")
 
         except IndexError:
             await message.channel.send('Please mention a user to cancel the disconnect command.')
         except FileNotFoundError:
             await message.channel.send('There are no pending disconnect commands.')
         except Exception as e:
-            print(f'Error in !cancel-Handler: {e}')
+            logging.error(f'Error in !cancel handler: {e}')
 
     if message.content.startswith('!queue') or message.content.startswith('!q'):
         try:
@@ -197,14 +218,15 @@ async def on_message(message):
         except FileNotFoundError:
             await message.channel.send('The queue is empty.')
         except Exception as e:
-            print(f'Error in !queue-Handler: {e}')
+            logging.error(f'Error in !queue handler: {e}')
 
 
 def get_member_name(line):
     user_id = int(line.split()[0])
     guild = bot.guilds[0]  # Assumes the bot is only in one guild
     member = guild.get_member(user_id)
-    return member.name
+    return member.name if member else f'Unknown User ({user_id})'
+
 
 def get_disconnect_time(line):
     disconnect_time_str = line.split()[2]
@@ -212,17 +234,18 @@ def get_disconnect_time(line):
     timestamp = int(disconnect_time.timestamp())
     return f'<t:{timestamp}:T>'
 
+
 def get_time_remaining(line):
     disconnect_time_str = line.split()[2]
     disconnect_time = datetime.fromisoformat(disconnect_time_str)
     remaining_time = disconnect_time - datetime.now()
-    
+
     days, seconds = remaining_time.days, remaining_time.seconds
     years, days = divmod(days, 365)
     months, days = divmod(days, 30)
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
-    
+
     time_str = ""
     if years > 0:
         time_str += f"```{years} Years``` "
@@ -236,7 +259,11 @@ def get_time_remaining(line):
         time_str += f"```{minutes} Minutes``` "
     if seconds > 0:
         time_str += f"```{seconds} Seconds``` "
-    
+
     return time_str.strip()
+
+
+if TOKEN is None:
+    raise ValueError("DISCORD_TOKEN is not set. Please provide it as an environment variable.")
 
 bot.run(TOKEN)
