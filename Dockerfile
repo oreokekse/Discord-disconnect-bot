@@ -1,15 +1,14 @@
-# Verwende ein schlankes Python-Image
-FROM python:3.11-slim
+FROM python:3.12-alpine
 
-# Arbeitsverzeichnis im Container setzen
+# Set the working directory inside the container
 WORKDIR /app
 
-# Requirements-Datei kopieren und Abhängigkeiten installieren
+# Copy the requirements file and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Restliche Projektdateien ins Image kopieren
+# Copy the rest of the project files into the image
 COPY . .
 
-# Container starten mit dem Bot
+# Start the container with the bot
 CMD ["python", "main.py"]
