@@ -8,7 +8,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the project files into the image
-COPY . .
+COPY main.py .
+COPY pending_commands.txt .
 
 # Start the container with the bot
 CMD ["python", "main.py"]
