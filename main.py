@@ -220,6 +220,18 @@ async def on_message(message):
         except Exception as e:
             logging.error(f'Error in !queue handler: {e}')
 
+    if message.content.startswith('!help') or message.content.startswith('!h'):
+        help_text = (
+            "**Available Commands:**\n"
+            "**!disconnect / !d @user <duration>** – Schedule a user to be disconnected from voice "
+            "after a certain time.\nDuration can be in s (seconds), m (minutes), or h (hours). "
+            "Example: `!d @User 10m` will disconnect the user in 10 minutes.\n"
+            "**!cancel / !c @user** – Cancel a scheduled disconnect for a user in the current channel.\n"
+            "**!queue / !q ** – Show all scheduled disconnects with time remaining.\n"
+        )
+        await message.channel.send(help_text)
+
+
 
 def get_member_name(line):
     user_id = int(line.split()[0])
