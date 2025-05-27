@@ -80,10 +80,29 @@ async def disconnect_user(member, channel, disconnect_time):
     if delay > 0:
         logging.info(f"Waiting {delay:.2f} seconds before disconnecting {member}.")
         await asyncio.sleep(delay)
+
+    # Re-check if the disconnect is still scheduled
+    still_scheduled = False
+    try:
+        with open(PENDING_COMMANDS_FILE, 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                if line.startswith(f'{member.id} {channel.id} {disconnect_time.isoformat()}'):
+                    still_scheduled = True
+                    break
+    except FileNotFoundError:
+        logging.warning(f"{PENDING_COMMANDS_FILE} not found while re-checking scheduled disconnect.")
+
+    if not still_scheduled:
+        logging.info(f"Skipping disconnect for {member}: schedule was cancelled.")
+        return
+
+    # Proceed with disconnect
     await member.move_to(None)
     await channel.send(f'{member.mention} has been disconnected from the voice channel')
     logging.info(f"{member} was disconnected from voice channel {channel.name}.")
 
+    # Clean up the entry from file
     with open(PENDING_COMMANDS_FILE, 'r+') as f:
         lines = f.readlines()
         f.seek(0)
@@ -93,6 +112,7 @@ async def disconnect_user(member, channel, disconnect_time):
                 f.write(line)
             else:
                 logging.debug(f"Cleaning up disconnect entry for {member.id} in {PENDING_COMMANDS_FILE}.")
+
 
 #/disconnect
 async def perform_disconnect(interaction: discord.Interaction, duration: str,
