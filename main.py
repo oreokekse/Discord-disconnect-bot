@@ -106,12 +106,44 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
+    if message.author == bot.user:
+        return  # Ignore bot's own messages
+
+    # Load allowed roles from environment
+    allowed_roles = os.getenv("ALLOWED_ROLES", "").split(",")
+    allowed_roles = [r.strip() for r in allowed_roles if r.strip()]
+
+    # Log loaded allowed roles
+    logging.debug(f"Allowed roles from ALLOWED_ROLES env: {allowed_roles}")
+
+    # Log roles of the user
+    user_roles = [role.name for role in message.author.roles]
+    logging.debug(f"User '{message.author}' has roles: {user_roles}")
+
+    # If no roles defined, allow all users, but log a warning
+    if not allowed_roles:
+        logging.warning("No ALLOWED_ROLES set. All users are allowed to use the bot. This is not secure.")
+    else:
+        if not any(role.name in allowed_roles for role in message.author.roles):
+            if message.content.startswith('!'):
+                logging.warning(
+                    f"Access denied: User '{message.author}' with roles {user_roles} "
+                    f"tried to run '{message.content}', but has no matching allowed role."
+                )
+                await message.channel.send("You don't have permission to use this bot.")
+            return
+
     if message.content.startswith('!disconnect') or message.content.startswith('!d'):
         try:
-            member = message.mentions[0]
+            mentions = message.mentions
+            if not mentions:
+                await message.channel.send('Please mention at least one user to disconnect.')
+                return
+
             time_str = message.content.split()[-1]
             delay = int(time_str[:-1])
             unit = time_str[-1]
+
             if unit.lower() == 's':
                 delay = timedelta(seconds=delay)
             elif unit.lower() == 'm':
@@ -120,59 +152,100 @@ async def on_message(message):
                 delay = timedelta(hours=delay)
             else:
                 raise ValueError('Invalid time format')
+
             disconnect_time = datetime.now() + delay
-            with open(PENDING_COMMANDS_FILE, 'a') as f:
-                f.write(f'{member.id} {message.channel.id} {disconnect_time.isoformat()}\n')
-            await message.channel.send(f'{member.mention} will be disconnected from the voice channel in {time_str}')
-            asyncio.create_task(disconnect_user(member, message.channel, disconnect_time))
-            logging.info(f'Scheduled disconnect for {member} at {disconnect_time}')
-        except (IndexError, ValueError):
-            logging.warning('Invalid format in !disconnect command.')
+
+            for member in mentions:
+                with open(PENDING_COMMANDS_FILE, 'a') as f:
+                    f.write(f'{member.id} {message.channel.id} {disconnect_time.isoformat()}\n')
+
+                await message.channel.send(
+                    f'{member.mention} will be disconnected from the voice channel in {time_str}'
+                )
+                asyncio.create_task(disconnect_user(member, message.channel, disconnect_time))
+                logging.info(f'Scheduled disconnect for {member} at {disconnect_time}')
+
+        except ValueError:
             await message.channel.send(
-                'Invalid command format. Please mention a user to disconnect and specify the delay time using a number followed by "s" for seconds, "m" for minutes, or "h" for hours.')
+                'Invalid command format. Use a time like `10s`, `5m`, or `2h` at the end.'
+            )
+        except Exception as e:
+            logging.error(f'Error in !disconnect handler: {e}')
 
     if message.content.startswith('!cancel') or message.content.startswith('!c'):
         try:
-            member = message.mentions[0]
+            if message.content.strip().endswith('all'):
+                with open(PENDING_COMMANDS_FILE, 'r+') as f:
+                    raw_lines = f.readlines()
+                    f.seek(0)
+                    f.truncate()
 
-            with open(PENDING_COMMANDS_FILE, 'r+') as f:
-                raw_lines = f.readlines()
-                f.seek(0)
-                f.truncate()
+                    removed_count = 0
 
-                removed = False
+                    for line in raw_lines:
+                        parts = line.strip().split(maxsplit=2)
+                        if len(parts) != 3:
+                            continue
 
-                for line in raw_lines:
-                    line = line.strip()
-                    if not line:
-                        continue
+                        user_id_str, channel_id_str, disconnect_time_str = parts
 
-                    parts = line.split(maxsplit=2)
-                    if len(parts) != 3:
-                        continue
+                        try:
+                            channel_id = int(channel_id_str)
+                        except ValueError:
+                            continue
 
-                    user_id_str, channel_id_str, disconnect_time_str = parts
+                        if channel_id == message.channel.id:
+                            removed_count += 1
+                        else:
+                            f.write(line)
 
-                    try:
-                        user_id = int(user_id_str)
-                        channel_id = int(channel_id_str)
-                    except ValueError:
-                        continue
-
-                    if user_id == member.id and channel_id == message.channel.id:
-                        removed = True
-                    else:
-                        f.write(f'{user_id} {channel_id} {disconnect_time_str}\n')
-
-            if removed:
-                await message.channel.send(f'Disconnect command for {member.mention} has been removed.')
-                logging.info(f"Removed scheduled disconnect for {member}.")
+                if removed_count > 0:
+                    await message.channel.send(f'Removed {removed_count} scheduled disconnect(s).')
+                    logging.info(f'Removed {removed_count} scheduled disconnect(s).')
+                else:
+                    await message.channel.send('There were no scheduled disconnects to remove.')
+                    logging.info(f'No scheduled disconnects to remove.')
             else:
-                await message.channel.send(f'There is no disconnect command for {member.mention} in this channel.')
-                logging.warning(f"No scheduled disconnect found for {member}.")
+                member = message.mentions[0]
+
+                with open(PENDING_COMMANDS_FILE, 'r+') as f:
+                    raw_lines = f.readlines()
+                    f.seek(0)
+                    f.truncate()
+
+                    removed = False
+
+                    for line in raw_lines:
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        parts = line.split(maxsplit=2)
+                        if len(parts) != 3:
+                            continue
+
+                        user_id_str, channel_id_str, disconnect_time_str = parts
+
+                        try:
+                            user_id = int(user_id_str)
+                            channel_id = int(channel_id_str)
+                        except ValueError:
+                            continue
+
+                        if user_id == member.id and channel_id == message.channel.id:
+                            removed = True
+                        else:
+                            f.write(f'{user_id} {channel_id} {disconnect_time_str}\n')
+
+                if removed:
+                    await message.channel.send(f'Disconnect command for {member.mention} has been removed.')
+                    logging.info(f"Removed scheduled disconnect for {member}.")
+                else:
+                    await message.channel.send(f'There is no disconnect command for {member.mention} in this channel.')
+                    logging.warning(f"No scheduled disconnect found for {member}.")
 
         except IndexError:
-            await message.channel.send('Please mention a user to cancel the disconnect command.')
+            await message.channel.send('Please mention a user to cancel the disconnect command or use `!cancel all`.')
         except FileNotFoundError:
             await message.channel.send('There are no pending disconnect commands.')
         except Exception as e:
