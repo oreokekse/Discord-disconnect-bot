@@ -1,8 +1,13 @@
 # Discord-disconnect-bot (Voice Channel Disconnect Bot)
 
-Voice channel management bot for discord
+Voice channel management bot for Discord
 
 This Discord bot allows you to disconnect users from voice channels after a specified amount of time.
+
+## Acknowledgments
+
+This project is based on [fakebhai/Discord-disconnect-bot]([https://github.com/fakebhai/Discord-disconnect-bot]).  
+Many thanks to oreokekse for providing the original code!
 
 ## Installation
 
@@ -10,7 +15,7 @@ This Discord bot allows you to disconnect users from voice channels after a spec
 
 ```bash
 
-git clone https://github.com/fakebhai/Discord-disconnect-bot.git
+git clone https://github.com/oreokekse/Discord-disconnect-bot.git
 
 ```
 
@@ -37,8 +42,23 @@ pip install -r requirements.txt
 6. Run the bot:
 
 ```bash
-
 python main.py
+
+```
+
+## Running with Docker
+
+1. Build the Docker image:
+
+```bash
+docker build -t discord-disconnect-bot .
+
+```
+
+2. Start the container using your `.env` file:
+
+```bash
+docker run --env-file .env discord-disconnect-bot
 
 ```
 
@@ -46,13 +66,13 @@ Make sure you have Python and pip installed before proceeding with the installat
 
 ## Usage
 
-The bot uses the following commands:
+The bot uses the following **slash commands**:
 
-- `!disconnect` or `!d @user [time]`: Disconnects the mentioned user from the voice channel after a specified time. The time can be in seconds (s), minutes (m), or hours (h).
+- `/disconnect` or `/d `: Disconnects the mentioned user from the voice channel after a specified time. The time can be in seconds (s), minutes (m), or hours (h).
 
-- `!cancel` or `!c @user`: Cancels the disconnect command for the mentioned user.
+- `/cancel` or `/c @user`: Cancels the disconnect command for the mentioned user.
 
-- `!queue` or `!q`: Displays the current queue of disconnect commands.
+- `/queue` : Displays the current queue of disconnect commands.
 
 ## License
 
@@ -65,4 +85,3 @@ Contributions are welcome! If you find any issues or have suggestions, feel free
 ## Disclaimer
 
 Please use this bot responsibly and ensure that you have the necessary permissions to disconnect users from voice channels. Remember to comply with Discord's [Terms of Service](https://discord.com/terms) and [Developer Terms](https://discord.com/developers/docs/legal). The bot developer is not responsible for any misuse or violations.
-
