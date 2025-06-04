@@ -7,7 +7,7 @@ This Discord bot allows you to disconnect users from voice channels after a spec
 ## Acknowledgments
 
 This project is based on [fakebhai/Discord-disconnect-bot]([https://github.com/fakebhai/Discord-disconnect-bot]).  
-Many thanks to oreokekse for providing the original code!
+Many thanks to fakebhai for providing the original code!
 
 ## Installation
 
