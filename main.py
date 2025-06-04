@@ -97,21 +97,41 @@ async def disconnect_user(member, channel, disconnect_time):
         logging.info(f"Skipping disconnect for {member}: schedule was cancelled.")
         return
 
-    # Proceed with disconnect
-    await member.move_to(None)
-    await channel.send(f'{member.mention} has been disconnected from the voice channel')
-    logging.info(f"{member} was disconnected from voice channel {channel.name}.")
+    # Proceed with disconnect if the user is in a voice channel
+    if member.voice and member.voice.channel:
+        try:
+            await member.move_to(None)
+            await channel.send(f'{member.mention} has been disconnected from the voice channel')
+            logging.info(f"{member} was disconnected from voice channel {channel.name}.")
+        except discord.Forbidden:
+            await channel.send(f'Failed to disconnect {member.mention} due to insufficient permissions.')
+            logging.exception(f"Missing permissions to disconnect {member}.")
+        except discord.HTTPException as exc:
+            await channel.send(f'Failed to disconnect {member.mention}.')
+            logging.exception(f"HTTP exception while disconnecting {member}: {exc}")
+    else:
+        await channel.send(f'{member.mention} was not connected to a voice channel.')
+        logging.info(f"{member} was not connected to a voice channel at disconnect time.")
 
     # Clean up the entry from file
-    with open(PENDING_COMMANDS_FILE, 'r+') as f:
-        lines = f.readlines()
-        f.seek(0)
-        f.truncate()
-        for line in lines:
-            if not line.startswith(f'{member.id} {channel.id} {disconnect_time.isoformat()}'):
-                f.write(line)
-            else:
-                logging.debug(f"Cleaning up disconnect entry for {member.id} in {PENDING_COMMANDS_FILE}.")
+    try:
+        with open(PENDING_COMMANDS_FILE, 'r+') as f:
+            lines = f.readlines()
+            f.seek(0)
+            f.truncate()
+            for line in lines:
+                if not line.startswith(f'{member.id} {channel.id} {disconnect_time.isoformat()}'):
+                    f.write(line)
+                else:
+                    logging.debug(
+                        f"Cleaning up disconnect entry for {member.id} in {PENDING_COMMANDS_FILE}."
+                    )
+    except FileNotFoundError:
+        logging.warning(
+            f"{PENDING_COMMANDS_FILE} not found when removing disconnect entry for {member}."
+        )
+    except Exception as exc:
+        logging.exception(f"Error while cleaning up disconnect entry for {member}: {exc}")
 
 
 #/disconnect
