@@ -68,6 +68,14 @@ async def queue_command(interaction: discord.Interaction):
     await handle_queue(interaction)
 
 
+@tree.command(name="purge", description="Remove expired pending disconnects")
+async def purge_command(interaction: discord.Interaction):
+    await interaction.response.defer()
+    logging.info(f"/purge command invoked by {interaction.user} in #{interaction.channel.name}")
+
+    await handle_purge(interaction)
+
+
 @tree.command(name="help", description="Show all available commands and their usage")
 async def help_command(interaction: discord.Interaction):
     await interaction.response.defer()
@@ -317,6 +325,51 @@ async def handle_queue(interaction: discord.Interaction):
         logging.exception("Unhandled error in handle_queue()")
         await interaction.followup.send(f"Error: {e}")
 
+
+#/purge
+async def handle_purge(interaction: discord.Interaction):
+    try:
+        removed = 0
+        now = datetime.now()
+
+        with open(PENDING_COMMANDS_FILE, 'r+') as f:
+            lines = f.readlines()
+            f.seek(0)
+            f.truncate()
+
+            for line in lines:
+                parts = line.strip().split(maxsplit=2)
+                if len(parts) != 3:
+                    logging.warning(f"Skipping malformed line: {line!r}")
+                    continue
+
+                _, _, time_str = parts
+                try:
+                    disconnect_time = datetime.fromisoformat(time_str)
+                except Exception as e:
+                    logging.warning(f"Invalid timestamp in line {line!r}: {e}")
+                    continue
+
+                if disconnect_time <= now:
+                    removed += 1
+                else:
+                    f.write(line)
+
+        if removed > 0:
+            logging.info(f"Purged {removed} expired disconnect command(s).")
+            await interaction.followup.send(f"Removed {removed} expired disconnect command(s).")
+        else:
+            logging.info("No expired entries to purge.")
+            await interaction.followup.send("No expired entries found.")
+
+    except FileNotFoundError:
+        logging.warning(f"{PENDING_COMMANDS_FILE} not found during purge operation.")
+        await interaction.followup.send("There are no pending disconnect commands.")
+    except Exception as e:
+        logging.exception("Unhandled error in handle_purge()")
+        await interaction.followup.send(f"Error: {e}")
+
+
 #/Help
 async def handle_help(interaction: discord.Interaction):
     help_text = (
@@ -328,16 +381,58 @@ async def handle_help(interaction: discord.Interaction):
         "**/cancel or /c** – Cancel a scheduled disconnect for a specific user in the current text channel.\n"
         "**/cancel all:true** – Cancel all scheduled disconnects in the current channel.\n\n"
         "**/queue** – Display all pending disconnects including remaining time.\n"
+        "**/purge** – Remove expired disconnects from the queue.\n"
     )
 
     await interaction.followup.send(help_text)
 
+
+# Clean up expired entries at startup
+async def cleanup_expired_entries():
+    try:
+        now = datetime.now()
+        removed = 0
+
+        with open(PENDING_COMMANDS_FILE, 'r+') as f:
+            lines = f.readlines()
+            f.seek(0)
+            f.truncate()
+
+            for line in lines:
+                parts = line.strip().split(maxsplit=2)
+                if len(parts) != 3:
+                    logging.warning(f"Skipping malformed line during startup cleanup: {line!r}")
+                    continue
+
+                _, _, time_str = parts
+                try:
+                    disconnect_time = datetime.fromisoformat(time_str)
+                except Exception as e:
+                    logging.warning(f"Invalid timestamp in line {line!r} during startup cleanup: {e}")
+                    continue
+
+                if disconnect_time <= now:
+                    removed += 1
+                else:
+                    f.write(line)
+
+        if removed:
+            logging.info(f"Startup cleanup removed {removed} expired pending disconnect(s).")
+    except FileNotFoundError:
+        logging.info(f"{PENDING_COMMANDS_FILE} not found during startup cleanup.")
+    except Exception:
+        logging.exception("Error during startup cleanup of pending commands")
+
+
+
 @bot.event
 async def on_ready():
     await tree.sync()
+    await cleanup_expired_entries()
     logging.info(f"{bot.user} is online and slash commands are synced.")
 
 if TOKEN is None:
     raise ValueError("DISCORD_TOKEN is not set. Please provide it as an environment variable.")
 
 bot.run(TOKEN)
+
