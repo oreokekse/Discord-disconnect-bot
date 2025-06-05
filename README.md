@@ -76,6 +76,10 @@ The bot uses the following **slash commands**:
 
 -  `/purge` : Removes expired entries from the queue. Restrict this command to trusted roles using Discord's command permissions.
 
+ ## Changelog
+
+See the [CHANGELOG.md](CHANGELOG.md) file for a history of changes.
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0. You can find the full license text in the [LICENSE](LICENSE) file.
