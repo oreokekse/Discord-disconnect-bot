@@ -74,6 +74,8 @@ The bot uses the following **slash commands**:
 
 - `/queue` : Displays the current queue of disconnect commands.
 
+-  `/purge` : Removes expired entries from the queue. Restrict this command to trusted roles using Discord's command permissions.
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0. You can find the full license text in the [LICENSE](LICENSE) file.
