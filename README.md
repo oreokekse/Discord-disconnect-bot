@@ -35,9 +35,9 @@ pip install -r requirements.txt
 
 ```
 
-4. Rename the `.example.env` file to `.env`
+4. Rename the `.example.env` file to `.env`.
 
-5. Open the `.env` file and add your Discord bot token.
+5. Open the `.env` file and add your Discord bot token or export it as an environment variable named `DISCORD_TOKEN`.
 
 6. Run the bot:
 
@@ -55,10 +55,14 @@ docker build -t discord-disconnect-bot .
 
 ```
 
-2. Start the container using your `.env` file:
+2. Start the container using your `.env` file or pass the token directly as an environment variable:
 
 ```bash
+# Using the .env file created earlier
 docker run --env-file .env discord-disconnect-bot
+
+# Or inject the token directly at runtime
+docker run -e DISCORD_TOKEN=your_bot_token discord-disconnect-bot
 
 ```
 
